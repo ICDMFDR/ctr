@@ -1,2 +1,2 @@
-# ctr
+# CTR
 Causal-based Therapy Recommendation
