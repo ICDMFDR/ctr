@@ -32,7 +32,7 @@ configs <- list(
 )
 
 black_list <- NULL
-threshold <- -999 ##A threshold -99 (very small) means using all predited treatment effect values to compare.
+threshold <- -999 ##A threshold -999 (very small) means using all predited treatment effect values to compare.
 
 message("Project folder: ", projectFolder)
 

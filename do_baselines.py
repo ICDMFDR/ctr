@@ -40,14 +40,27 @@ DATASETS = [
 # -----------------------------
 # Global params
 # -----------------------------
-threshold = -999  # use all predicted treatment-effect values (threshold -99 is very small, below 0)
+threshold = -999  # use all predicted treatment-effect values (threshold -999 is very small, below 0)
 random_seed = 42
 folds = 5
 test_size = 0.30
 
 base_folder = os.getcwd()
-outputPath = os.path.join(base_folder, "output")
+outputPath = os.path.join(base_folder, "output1")
 os.makedirs(outputPath, exist_ok=True)
+
+import os, random, numpy as np
+def seed_everything(seed: int = 42):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    random.seed(seed)
+    np.random.seed(seed)
+seed_everything(42)
+random.seed(random_seed)
+np.random.seed(random_seed)
 
 # -----------------------------
 # Helpers
@@ -67,7 +80,7 @@ def split_data(base_folder: str, data_name: str, folds: int, test_size: float) -
     dataset = pd.read_csv(input_csv, encoding="ISO-8859-1", engine="python")
     # sanitise column names (spaces -> '.')
     dataset.columns = dataset.columns.str.strip().str.replace(r"\s+", ".", regex=True)
-    dataset.to_csv(os.path.join(inputPath, f"{data_name}_sanitised.csv"), index=False)
+    # dataset.to_csv(os.path.join(inputPath, f"{data_name}_sanitised.csv"), index=False)
 
     # If splits already exist, skip regeneration
     existing = all(
@@ -107,7 +120,7 @@ def run_pipeline_for_dataset(cfg: dict):
     print("=" * 70)
 
     # 1) Ensure splits exist (comment out if you already have them)
-    # split_data(base_folder, data_name, folds, test_size)
+    split_data(base_folder, data_name, folds, test_size)
 
     # 2) Run baselines (allTP, eachTP) and current protocol
     #    These functions are expected to read the fold files from input/
@@ -119,10 +132,10 @@ def run_pipeline_for_dataset(cfg: dict):
         data_name, treatment_plans, outcome_name,
         remove_attributes, threshold, base_folder, random_seed
     )
-    current_protocol_validation_fold(
-        data_name, treatment_plans, outcome_name,
-        remove_attributes, threshold, base_folder, random_seed
-    )
+    # current_protocol_validation_fold(
+    #     data_name, treatment_plans, outcome_name,
+    #     remove_attributes, threshold, base_folder, random_seed
+    # )
     print(f"[{data_name}] Completed.\n")
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ DATASETS = {
 }
 # Current protocol recovery rate (fixed) per dataset
 CURRENT_PR = {
-    "NEO": 0.25,
+    "NEO": 0.26,
     "DUKE": 0.21,
 
 }
@@ -94,7 +94,12 @@ def process_dataset(inputName: str, outcome_name: str):
 
     for method in methods:
         prefileName = f"{inputName}_{testName}_{method}_{threshold}_"
-        postfileName = "survival"
+
+        if inputName == "DUKE":
+            postfileName = "follow"
+        # if inputName == "NEO":
+        else:
+            postfileName = ""
         fullResultFolder = os.path.join(baseInFolder, method, inputName)
 
         calculate_recovery_ratio(
@@ -138,8 +143,8 @@ def process_dataset(inputName: str, outcome_name: str):
 
     recovery_df = recovery_df.reset_index(drop=True)
     # Save the raw recovery table
-    recovery_csv = os.path.join(PerformanceEval_folder, f"{inputName}{threshold}_Recovery.csv")
-    recovery_df.to_csv(recovery_csv, index=False)
+    # recovery_csv = os.path.join(PerformanceEval_folder, f"{inputName}{threshold}_Recovery.csv")
+    # recovery_df.to_csv(recovery_csv, index=False)
 
     # === Compute Metrics (guard divide-by-zero) ===
     denom = recovery_df["NotFollowing_Recovery"].replace(0, np.nan)
@@ -147,8 +152,9 @@ def process_dataset(inputName: str, outcome_name: str):
     # if denom was zero, fallback to numerator (same behaviour you had)
     recovery_df["Recovery_Ratio"] = recovery_df["Recovery_Ratio"].fillna(recovery_df["Following_Recovery"])
 
-    denom2 = recovery_df["Following_Count"].replace(0, np.nan)
-    recovery_df["Recovery_Rate"] = (recovery_df["Following_Recovery"] / denom2).fillna(0.0)
+    # denom2 = recovery_df["Following_Count"].replace(0, np.nan)
+    # recovery_df["Recovery_Rate"] = (recovery_df["Following_Recovery"] / denom2).fillna(0.0)
+    recovery_df["Recovery_Rate"] = (recovery_df["Following_Recovery"] / recovery_df["Following_Count"])
 
     # Save updated CSV (metrics)
     updated_csv_path = os.path.join(PerformanceEval_folder, f"{inputName}{threshold}_Recovery_Metrics.csv")
@@ -203,11 +209,6 @@ def process_dataset(inputName: str, outcome_name: str):
     plot_path_rate = os.path.join(PerformanceEval_folder, f"{inputName}{threshold}_Recovery_Rate.png")
     plt.savefig(plot_path_rate, dpi=300)
     plt.show()
-
-    print(f"✅ Saved: {recovery_csv}")
-    print(f"✅ Saved: {updated_csv_path}")
-    print(f"📊 Saved: {plot_path_ratio}")
-    print(f"📊 Saved: {plot_path_rate}")
 
 # ---- Run both datasets ----
 for ds, outc in DATASETS.items():

@@ -11,6 +11,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, GradientBoostingRegressor
+from sklearn.feature_selection import VarianceThreshold
+
 
 
 
@@ -250,8 +252,6 @@ def cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, t
 
     data_out = estimateUplift(data, outcome_name)
 
-    # data_out = data.copy()
-    # data_out['PAM50'] = test_data['PAM50']
     # Create output directories
     output_dir = os.path.join(base_folder, 'output')
     if not os.path.exists(output_dir):
@@ -265,9 +265,6 @@ def cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, t
     if not os.path.exists(output_data_name):
         os.makedirs(output_data_name)
 
-    # sum_REC = data_out['FOLLOW_REC'].sum()
-    # new_file_name = f'{data_name}_test_{method}_thres{threshold}_{sum_REC}REC_validation4.csv'
-    # new_file_name = f'{data_name}_{method}_TPs_REC.csv'
 
     fileName = os.path.basename(testFile)
 
@@ -281,29 +278,135 @@ def cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, t
     new_file_name = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}.{fileNameParts[1]}"
 
     full_path = os.path.join(output_data_name, new_file_name)
-    data_out.to_csv(full_path, index=False)
+    # data_out.to_csv(full_path, index=False)
 
     # ✅ Create the new CSV file with test_data + FOLLOW_REC
-    new_file_name_survival = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_survival.{fileNameParts[1]}"
-    full_path_survival = os.path.join(output_data_name, new_file_name_survival)
+    new_file_name_follow = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_follow.{fileNameParts[1]}"
+    full_path_follow = os.path.join(output_data_name, new_file_name_follow)
 
     # Merge FOLLOW_REC into original test_data
     test_data_with_rec = test_data.copy()
     test_data_with_rec["FOLLOW_REC"] = data["FOLLOW_REC"].values
 
     # Save new file
-    test_data_with_rec.to_csv(full_path_survival, index=False)
+    # test_data_with_rec.to_csv(full_path_follow, index=False)
+
+def get_model_pipeline(method: str, random_seed: int):
+    imputer = SimpleImputer(strategy="median")
+    no_constants = VarianceThreshold(0.0)
+    scaler = StandardScaler()
+
+    if method in ["LogrRa", "LogrRe"]:
+        # Deterministic + stable: single thread, scaled, more iters
+        model = LogisticRegression(
+            solver="saga", penalty="l2", C=1.0,
+            max_iter=5000, tol=1e-3, n_jobs=1,
+            random_state=random_seed
+        )
+        steps = [("imputer", imputer), ("varthresh", no_constants), ("scaler", scaler), ("clf", model)]
+
+    elif method in ["SvmRa", "SvmRe"]:
+        # SVC: keep single-threaded; give random_state to stabilise prob. estimates
+        model = SVC(
+            kernel="rbf", probability=True, C=1.0, gamma="scale",
+            class_weight=None, random_state=random_seed
+        )
+        steps = [("imputer", imputer), ("varthresh", no_constants), ("scaler", scaler), ("clf", model)]
+
+    elif method in ["RfRa", "RfRe"]:
+        # RF: set n_jobs=1 for full determinism; keep bootstrap default True
+        model = RandomForestClassifier(
+            n_estimators=300, random_state=random_seed, n_jobs=1,
+            class_weight="balanced_subsample"
+        )
+        steps = [("imputer", imputer), ("varthresh", no_constants), ("clf", model)]
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    return Pipeline(steps)
+
+# def get_model_pipeline(method: str, random_seed: int):
+#     """
+#     Returns a sklearn Pipeline with imputer + (feature filter) + (scaler if needed) + classifier.
+#     Supported: LogrRa, LogrRe, SvmRa, SvmRe, RfRa, RfRe
+#     """
+#     method = str(method)
+#
+#     # Shared steps
+#     imputer = SimpleImputer(strategy="median")  # median is robust to outliers
+#     # Remove constant features (helps LR/SVM convergence a lot)
+#     no_constants = VarianceThreshold(threshold=0.0)
+#     scaler = StandardScaler()
+#
+#     if method in ["LogrRa", "LogrRe"]:
+#         # More iterations, looser tol, robust solver; scale features
+#         model = LogisticRegression(
+#             solver="saga",            # robust for large/high-dim; supports l1/l2/elasticnet
+#             penalty="l2",
+#             C=1.0,
+#             max_iter=5000,
+#             tol=1e-3,                 # slightly looser tolerance speeds convergence
+#             n_jobs=-1,
+#             class_weight=None,        # or "balanced" if your classes are skewed
+#             random_state=random_seed
+#         )
+#         pipeline = Pipeline([
+#             ("imputer", imputer),
+#             ("varthresh", no_constants),
+#             ("scaler", scaler),
+#             ("clf", model),
+#         ])
+#
+#     elif method in ["SvmRa", "SvmRe"]:
+#         # SVM *must* be scaled
+#         model = SVC(
+#             kernel="rbf",
+#             probability=True,
+#             C=1.0,
+#             gamma="scale",
+#             class_weight=None,        # or "balanced" if needed
+#             random_state=random_seed
+#         )
+#         pipeline = Pipeline([
+#             ("imputer", imputer),
+#             ("varthresh", no_constants),
+#             ("scaler", scaler),
+#             ("clf", model),
+#         ])
+#
+#     elif method in ["RfRa", "RfRe"]:
+#         # RF does not need scaling; keep as-is
+#         model = RandomForestClassifier(
+#             n_estimators=300,
+#             max_depth=None,
+#             min_samples_split=2,
+#             min_samples_leaf=1,
+#             random_state=random_seed,
+#             n_jobs=-1,
+#             class_weight="balanced_subsample"  # keeps trees stable if imbalance exists
+#         )
+#         pipeline = Pipeline([
+#             ("imputer", imputer),
+#             ("varthresh", no_constants),
+#             ("clf", model),
+#         ])
+#
+#     else:
+#         raise ValueError(f"Unknown method: {method}")
+#
+#     return pipeline
 
 # def get_model_pipeline(method: str, random_seed: int):
 #     """
 #     Returns a sklearn Pipeline with imputer + classifier for a given method.
-#     Supported methods: LOGRa, SvmRa, RfRa
+#     Supported methods: LogrRa, LogrRe, SvmRa, SvmRe, RfRa, RfRe
 #     """
-#     if method == "LogrRa" or "LogrRe":
+#     if method in ["LogrRa", "LogrRe"]:
 #         model = LogisticRegression(random_state=random_seed, max_iter=1000)
-#     elif method == "SvmRa" or "SvmRe":
+#     elif method in ["SvmRa", "SvmRe"]:
 #         model = SVC(probability=True, random_state=random_seed)
-#     elif method == "RfRa" or "RfRe" :
+#     elif method in ["RfRa", "RfRe"]:
 #         model = RandomForestClassifier(
 #             n_estimators=200,
 #             random_state=random_seed,
@@ -317,30 +420,6 @@ def cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, t
 #         ("clf", model)
 #     ])
 #     return pipeline
-
-def get_model_pipeline(method: str, random_seed: int):
-    """
-    Returns a sklearn Pipeline with imputer + classifier for a given method.
-    Supported methods: LogrRa, LogrRe, SvmRa, SvmRe, RfRa, RfRe
-    """
-    if method in ["LogrRa", "LogrRe"]:
-        model = LogisticRegression(random_state=random_seed, max_iter=1000)
-    elif method in ["SvmRa", "SvmRe"]:
-        model = SVC(probability=True, random_state=random_seed)
-    elif method in ["RfRa", "RfRe"]:
-        model = RandomForestClassifier(
-            n_estimators=200,
-            random_state=random_seed,
-            class_weight="balanced"
-        )
-    else:
-        raise ValueError(f"Unknown method: {method}")
-
-    pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="mean")),
-        ("clf", model)
-    ])
-    return pipeline
 
 def model_validation_fold_allTP(data_name, treatment_plans, outcome_name, remove_attributes, threshold, base_folder, random_seed):
     input_data_folder = os.path.join(base_folder, 'input', data_name)
@@ -392,20 +471,20 @@ def model_validation_fold_allTP(data_name, treatment_plans, outcome_name, remove
                                       treatment_plans, remove_attributes, threshold)
 
 
-        testFile = f"{input_data_folder}/{data_name}_train_{timecn}.csv"
-        method = 'LogrRa'
-        trained_model = LOGRa_model
-        cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                      treatment_plans, remove_attributes, threshold)
-
-        method = 'RfRa'
-        trained_model = RFa_model
-        cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                      treatment_plans, remove_attributes, threshold)
-        method = 'SvmRa'
-        trained_model = SVMa_model
-        cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                      treatment_plans, remove_attributes, threshold)
+        # testFile = f"{input_data_folder}/{data_name}_train_{timecn}.csv"
+        # method = 'LogrRa'
+        # trained_model = LOGRa_model
+        # cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                               treatment_plans, remove_attributes, threshold)
+        #
+        # method = 'RfRa'
+        # trained_model = RFa_model
+        # cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                               treatment_plans, remove_attributes, threshold)
+        # method = 'SvmRa'
+        # trained_model = SVMa_model
+        # cross_validation_uplift_score_fold_allTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                               treatment_plans, remove_attributes, threshold)
 
 
 def model_validation_fold_eachTP(data_name, treatment_plans, outcome_name, remove_attributes, threshold, base_folder, random_seed):
@@ -415,9 +494,6 @@ def model_validation_fold_eachTP(data_name, treatment_plans, outcome_name, remov
         trainingFile = f"{input_data_folder}/{data_name}_train_{timecn}.csv"
         train_Data = pd.read_csv(trainingFile)
 
-        # Flip 0 → 1 and 1 → 0
-        if data_name == "METABRIC":
-            train_Data[outcome_name] = 1 - train_Data[outcome_name]
 
         X_train = train_Data.drop(columns=remove_attributes + [outcome_name], axis=1)
         y_train = train_Data[outcome_name]
@@ -450,20 +526,20 @@ def model_validation_fold_eachTP(data_name, treatment_plans, outcome_name, remov
                                            treatment_plans, remove_attributes, threshold)
 
 
-        testFile = f"{input_data_folder}/{data_name}_train_{timecn}.csv"
-        method = 'LogrRe'
-        trained_model = LOGRe_model
-        validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                           treatment_plans, remove_attributes, threshold)
-
-        method = 'RfRe'
-        trained_model = RFe_model
-        validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                           treatment_plans, remove_attributes, threshold)
-        method = 'SvmRe'
-        trained_model = SVMe_model
-        validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
-                                           treatment_plans, remove_attributes, threshold)
+        # testFile = f"{input_data_folder}/{data_name}_train_{timecn}.csv"
+        # method = 'LogrRe'
+        # trained_model = LOGRe_model
+        # validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                                    treatment_plans, remove_attributes, threshold)
+        #
+        # method = 'RfRe'
+        # trained_model = RFe_model
+        # validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                                    treatment_plans, remove_attributes, threshold)
+        # method = 'SvmRe'
+        # trained_model = SVMe_model
+        # validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder,
+        #                                    treatment_plans, remove_attributes, threshold)
 #
 #
 
@@ -528,14 +604,10 @@ def train_model_eachTP(method, trainingData, y_train, treatment_plans, random_se
 def validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFile, outcome_name, base_folder, treatment_plans, remove_attributes, threshold):
     test_data = pd.read_csv(testFile)
     test = test_data.copy()
-    # Flip 0 → 1 and 1 → 0
-    if data_name == "METABRIC":
-        test[outcome_name] = 1 - test[outcome_name]
 
     test = test.drop(columns=remove_attributes, axis=1)
 
     data = test.drop(columns=[outcome_name], axis=1)
-    # y_test = test_Data[outcome_name]
 
 
     ## Predict the Probability of receving Positive outcome (1) for testing data.
@@ -605,18 +677,18 @@ def validation_uplift_score_fold_eachTP(method, data_name, trained_model, testFi
     new_file_name = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}.{fileNameParts[1]}"
 
     full_path = os.path.join(output_data_name, new_file_name)
-    data_out.to_csv(full_path, index=False)
+    # data_out.to_csv(full_path, index=False)
 
     # ✅ Create the new CSV file with test_data + FOLLOW_REC
-    new_file_name_survival = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_survival.{fileNameParts[1]}"
-    full_path_survival = os.path.join(output_data_name, new_file_name_survival)
+    new_file_name_follow = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_follow.{fileNameParts[1]}"
+    full_path_follow = os.path.join(output_data_name, new_file_name_follow)
 
     # Merge FOLLOW_REC into original test_data
     test_data_with_rec = test_data.copy()
     test_data_with_rec["FOLLOW_REC"] = data["FOLLOW_REC"].values
 
     # Save new file
-    test_data_with_rec.to_csv(full_path_survival, index=False)
+    # test_data_with_rec.to_csv(full_path_follow, index=False)
 
 
 def predict_prob_eachTP(trained_models, test_data, treatment_plans):
@@ -750,15 +822,15 @@ def current_protocol_validation_uplift_score(method, data_name, testFile, outcom
     data_out.to_csv(full_path, index=False)
 
     # ✅ Create the new CSV file with test_data + FOLLOW_REC
-    new_file_name_survival = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_survival.{fileNameParts[1]}"
-    full_path_survival = os.path.join(output_data_name, new_file_name_survival)
+    new_file_name_follow = f"{secondFileNameParts[0]}_{secondFileNameParts[1]}_{method}_{threshold}_{secondFileNameParts[2]}_follow.{fileNameParts[1]}"
+    full_path_follow = os.path.join(output_data_name, new_file_name_follow)
 
     # Merge FOLLOW_REC into original test_data
     test_data_with_rec = test_data.copy()
     test_data_with_rec["FOLLOW_REC"] = data["FOLLOW_REC"].values
 
     # Save new file
-    test_data_with_rec.to_csv(full_path_survival, index=False)
+    test_data_with_rec.to_csv(full_path_follow, index=False)
 
 
 def current_protocol_validation_fold(data_name, treatment_plans, outcome_name, remove_attributes, threshold, base_folder,

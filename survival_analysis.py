@@ -25,10 +25,8 @@ def survival_curves(fullResultFolder, fold_nbr, prefileName, postfileName,
     # Find time and event columns
 
     if inputName == "DUKE":
-        # time_col_candidates = [c for c in data.columns if "Survival.allDays" in c ]
         event_col_candidates = [c for c in data.columns if "rfs_event" in c]
         time_col_candidates = [c for c in data.columns if "rfs_time" in c ]
-        # event_col_candidates = [c for c in data.columns if "Event" in c]
 
     if not time_col_candidates or not event_col_candidates:
         raise ValueError("Time or Event column not found!")
@@ -82,15 +80,6 @@ def survival_curves(fullResultFolder, fold_nbr, prefileName, postfileName,
     else:
         plt.show()
 
-    # # Cox PH for HR (optional print)
-    # cox_df = data[[time_col, event_col, "FOLLOW_REC"]].rename(
-    #     columns={time_col: "time", event_col: "event"}
-    # )
-    # cph = CoxPHFitter()
-    # cph.fit(cox_df, duration_col="time", event_col="event")
-    # print(f"✅ Hazard Ratio (HR): {cph.hazard_ratios_['FOLLOW_REC']:.3f}")
-
-
     return p_value
 
 
@@ -101,9 +90,7 @@ def survival_curves(fullResultFolder, fold_nbr, prefileName, postfileName,
 methods = ["LogrRe", "LogrRa", "SvmRe", "SvmRa", "RfRe", "RfRa", "CTR"]
 fold_nbr = 5
 threshold = -999
-# outcomeName = "Relapse.Free.Status"
 baseInFolder = "./output/"
-# inputName = "METABRIC"
 testName = "test"
 
 inputName = "DUKE"
@@ -116,7 +103,7 @@ results_summary = []
 
 for method in methods:
     prefileName = f"{inputName}_{testName}_{method}_{threshold}_"
-    postfileName = "survival"
+    postfileName = "follow"
     fullResultFolder = os.path.join(baseInFolder, method, inputName)
 
     # Define plot file path
